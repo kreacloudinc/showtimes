@@ -1,4 +1,5 @@
-import { Alias, DatabaseModel, GetInfo, LogOrigin, ProjectData } from 'ontime-types';
+import { LogOrigin } from 'ontime-types';
+import type { Alias, DatabaseModel, GetInfo, HttpSettings, ProjectData } from 'ontime-types';
 
 import { RequestHandler, Request, Response } from 'express';
 import fs from 'fs';
@@ -9,14 +10,17 @@ import { DataProvider } from '../classes/data-provider/DataProvider.js';
 import { failEmptyObjects, failIsNotArray } from '../utils/routerUtils.js';
 import { PlaybackService } from '../services/PlaybackService.js';
 import { eventStore } from '../stores/EventStore.js';
-import { isDocker, pathToStartStyles, resolveDbPath } from '../setup.js';
+import { isDocker, resolveDbPath, resolveStylesPath } from '../setup.js';
 import { oscIntegration } from '../services/integration-service/OscIntegration.js';
+import { httpIntegration } from '../services/integration-service/HttpIntegration.js';
 import { logger } from '../classes/Logger.js';
 import { deleteAllEvents, notifyChanges } from '../services/rundown-service/RundownService.js';
 import { deepmerge } from 'ontime-utils';
 import { runtimeCacheStore } from '../stores/cachingStore.js';
 import { delayedRundownCacheKey } from '../services/rundown-service/delayedRundown.utils.js';
 import { integrationService } from '../services/integration-service/IntegrationService.js';
+
+import { sheet } from '../utils/sheetsAuth.js';
 
 // Create controller for GET request to '/ontime/poll'
 // Returns data for current state
@@ -115,7 +119,7 @@ export const getInfo = async (req: Request, res: Response<GetInfo>) => {
   // get nif and inject localhost
   const ni = getNetworkInterfaces();
   ni.unshift({ name: 'localhost', address: '127.0.0.1' });
-  const cssOverride = pathToStartStyles;
+  const cssOverride = resolveStylesPath;
 
   // send object with network information
   res.status(200).send({
@@ -284,27 +288,6 @@ export const getOSC = async (req, res) => {
   res.status(200).send(osc);
 };
 
-export const postOscSubscriptions = async (req, res) => {
-  if (failEmptyObjects(req.body, res)) {
-    return;
-  }
-
-  try {
-    const oscSubscriptions = req.body;
-    const oscSettings = DataProvider.getOsc();
-    oscSettings.subscriptions = oscSubscriptions;
-    await DataProvider.setOsc(oscSettings);
-
-    // TODO: this update could be more granular, checking that relevant data was changed
-    const { message } = oscIntegration.init(oscSettings);
-    logger.info(LogOrigin.Tx, message);
-
-    res.send(oscSettings).status(200);
-  } catch (error) {
-    res.status(400).send({ message: error.toString() });
-  }
-};
-
 // Create controller for POST request to '/ontime/osc'
 // Returns ACK message
 export const postOSC = async (req, res) => {
@@ -327,6 +310,59 @@ export const postOSC = async (req, res) => {
     }
 
     res.send(oscSettings).status(200);
+  } catch (error) {
+    res.status(400).send({ message: error.toString() });
+  }
+};
+
+export const postOscSubscriptions = async (req, res) => {
+  if (failEmptyObjects(req.body, res)) {
+    return;
+  }
+
+  try {
+    const subscriptions = req.body;
+    const oscSettings = DataProvider.getOsc();
+    oscSettings.subscriptions = subscriptions;
+    await DataProvider.setOsc(oscSettings);
+
+    // TODO: this update could be more granular, checking that relevant data was changed
+    const { message } = oscIntegration.init(oscSettings);
+    logger.info(LogOrigin.Tx, message);
+
+    res.send(oscSettings).status(200);
+  } catch (error) {
+    res.status(400).send({ message: error.toString() });
+  }
+};
+
+// Create controller for GET request to '/ontime/http'
+export const getHTTP = async (_req, res: Response<HttpSettings>) => {
+  const http = DataProvider.getHttp();
+  res.status(200).send(http);
+};
+
+// Create controller for POST request to '/ontime/http'
+export const postHTTP = async (req, res) => {
+  if (failEmptyObjects(req.body, res)) {
+    return;
+  }
+
+  try {
+    const httpSettings = req.body;
+    await DataProvider.setHttp(httpSettings);
+
+    integrationService.unregister(httpIntegration);
+
+    // TODO: this update could be more granular, checking that relevant data was changed
+    const { success, message } = httpIntegration.init(httpSettings);
+    logger.info(LogOrigin.Tx, message);
+
+    if (success) {
+      integrationService.register(httpIntegration);
+    }
+
+    res.send(httpSettings).status(200);
   } catch (error) {
     res.status(400).send({ message: error.toString() });
   }
@@ -421,3 +457,122 @@ export const postNew: RequestHandler = async (req, res) => {
     res.status(400).send({ message: error.toString() });
   }
 };
+
+//SHEET Functions
+/**
+ * @description SETP-1 POST Client Secrect
+ * @returns parsed result
+ */
+export async function uploadSheetClientFile(req, res) {
+  if (!req.file.path) {
+    res.status(400).send({ message: 'File not found' });
+    return;
+  }
+  try {
+    const client = JSON.parse(fs.readFileSync(req.file.path as string, 'utf-8'));
+    await sheet.saveClientSecrets(client);
+    res.status(200).send('OK');
+  } catch (error) {
+    res.status(500).send({ message: error.toString() });
+  }
+  fs.unlink(req.file.path, (err) => {
+    if (err) logger.error(LogOrigin.Server, err.message);
+  });
+}
+
+/**
+ * @description SETP-1 GET Client Secrect status
+ */
+export const getClientSecrect = async (req, res) => {
+  try {
+    const clientSecrectExists = await sheet.testClientSecret();
+    if (clientSecrectExists) {
+      res.status(200).send();
+    } else {
+      res.status(500).send({ message: 'The Client ID does not exist' });
+    }
+  } catch (error) {
+    res.status(500).send({ message: error.toString() });
+  }
+};
+
+/**
+ * @description SETP-2 GET sheet authentication url
+ */
+export async function getAuthenticationUrl(req, res) {
+  try {
+    const authUrl = await sheet.openAuthServer();
+    res.status(200).send(authUrl);
+  } catch (error) {
+    res.status(500).send({ message: error.toString() });
+  }
+}
+
+/**
+ * @description SETP-2 GET sheet authentication status
+ */
+export const getAuthentication = async (req, res) => {
+  try {
+    await sheet.testAuthentication();
+    res.status(200).send();
+  } catch (error) {
+    res.status(500).send({ message: error.toString() });
+  }
+};
+
+/**
+ * @description SETP-3 POST sheet id
+ * @returns list of worksheets
+ */
+export const postId = async (req, res) => {
+  try {
+    const { id } = req.body;
+    if (id.lenght < 40) {
+      res.status(400).send({ message: 'ID is usualy 44 characters long' });
+    }
+    const state = await sheet.testSheetId(id);
+    res.status(200).send(state);
+  } catch (error) {
+    res.status(500).send({ message: error.toString() });
+  }
+};
+
+/**
+ * @description SETP-4 POST worksheet
+ */
+export const postWorksheet = async (req, res) => {
+  try {
+    const { worksheet, id } = req.body;
+    const state = await sheet.testWorksheet(worksheet, id);
+    res.status(200).send(state);
+  } catch (error) {
+    res.status(500).send({ message: error.toString() });
+  }
+};
+
+/**
+ * @description STEP-5 POST download undown to sheet
+ * @returns parsed result
+ */
+export async function pullSheet(req, res) {
+  try {
+    const { id, options } = req.body;
+    const data = await sheet.pull(id, options);
+    res.status(200).send(data);
+  } catch (error) {
+    res.status(500).send({ message: error.toString() });
+  }
+}
+
+/**
+ * @description STEP-5 POST upload rundown to sheet
+ */
+export async function pushSheet(req, res) {
+  try {
+    const { id, options } = req.body;
+    await sheet.push(id, options);
+    res.status(200).send();
+  } catch (error) {
+    res.status(500).send({ message: error.toString() });
+  }
+}

@@ -6,6 +6,7 @@ import {
   getAliases,
   getInfo,
   getOSC,
+  getHTTP,
   getSettings,
   getUserFields,
   getViewSettings,
@@ -19,16 +20,28 @@ import {
   postUserFields,
   postViewSettings,
   previewExcel,
+  postHTTP,
+  getAuthenticationUrl,
+  uploadSheetClientFile as uploadClientSecret,
+  pullSheet,
+  pushSheet,
+  postId,
+  getAuthentication,
+  getClientSecrect as getClientSecret,
 } from '../controllers/ontimeController.js';
 
 import {
   validateAliases,
   validateOSC,
-  validateOscSubscription,
   validatePatchProjectFile,
   validateSettings,
   validateUserFields,
   viewValidator,
+  validateHTTP,
+  validateOscSubscription,
+  validateSheetid,
+  validateWorksheet,
+  validateSheetOptions,
 } from '../controllers/ontimeController.validate.js';
 import { projectSanitiser } from '../controllers/projectController.validate.js';
 
@@ -85,5 +98,31 @@ router.post('/osc', validateOSC, postOSC);
 // create route between controller and '/ontime/osc-subscriptions' endpoint
 router.post('/osc-subscriptions', validateOscSubscription, postOscSubscriptions);
 
+// create route between controller and '/ontime/http' endpoint
+router.get('/http', getHTTP);
+
+// create route between controller and '/ontime/http' endpoint
+router.post('/http', validateHTTP, postHTTP);
+
 // create route between controller and '/ontime/new' endpoint
 router.post('/new', projectSanitiser, postNew);
+
+//SETP-1
+router.post('/sheet/clientsecret', uploadFile, uploadClientSecret);
+router.get('/sheet/clientsecret', uploadFile, getClientSecret);
+
+//SETP-2
+router.get('/sheet/authentication/url', getAuthenticationUrl);
+router.get('/sheet/authentication', getAuthentication);
+
+//STEP-3
+router.post('/sheet/id', validateSheetid, postId);
+
+//STEP-4
+router.post('/sheet/worksheet', validateWorksheet, postId);
+
+//STEP-5 download and generate preview
+router.post('/sheet/pull', validateSheetOptions, pullSheet);
+
+//STEP-5 upload
+router.post('/sheet-push', validateSheetOptions, pushSheet);

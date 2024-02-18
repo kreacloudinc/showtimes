@@ -5,9 +5,11 @@ export const USERFIELDS = ['userFields'];
 export const RUNDOWN = ['rundown'];
 export const APP_INFO = ['appinfo'];
 export const OSC_SETTINGS = ['oscSettings'];
+export const HTTP_SETTINGS = ['httpSettings'];
 export const APP_SETTINGS = ['appSettings'];
 export const VIEW_SETTINGS = ['viewSettings'];
 export const RUNTIME = ['runtimeStore'];
+export const SHEET_STATE = ['sheetState'];
 
 const location = window.location;
 const socketProtocol = location.protocol === 'https:' ? 'wss' : 'ws';
